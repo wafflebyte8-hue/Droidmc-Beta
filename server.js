@@ -1231,13 +1231,17 @@ function startServer(reason = 'manual') {
     fs.writeFileSync(eulaPath, 'eula=true\n');
   }
 
-  const child = spawn(CONFIG.javaPath, [
+  const launchArgs = [
     `-Xmx${CONFIG.memory}`,
     `-Xms${CONFIG.memory}`,
     '-jar',
     CONFIG.serverJar,
-    'nogui',
-  ], {
+  ];
+  if (CONFIG.serverType !== 'nukkit') {
+    launchArgs.push('nogui');
+  }
+
+  const child = spawn(CONFIG.javaPath, launchArgs, {
     cwd: CONFIG.serverDir,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -1391,6 +1395,86 @@ async function fetchPaperDownload(version) {
   };
 }
 
+async function fetchPurpurDownload(version) {
+  const builds = await httpsGet(`https://api.purpurmc.org/v2/purpur/${version}`);
+  const build = Math.max(...(builds.builds || []));
+  if (!Number.isFinite(build)) {
+    throw new Error('No Purpur build found for that version');
+  }
+  return {
+    url: `https://api.purpurmc.org/v2/purpur/${version}/${build}/download`,
+    checksum: null,
+  };
+}
+
+async function fetchGitHubReleases(repo) {
+  const releases = await httpsGet(`https://api.github.com/repos/${repo}/releases?per_page=25`);
+  if (!Array.isArray(releases)) {
+    throw new Error('Unexpected GitHub releases response');
+  }
+  return releases.filter((release) => !release.draft && !release.prerelease);
+}
+
+async function fetchNukkitDownload(version) {
+  const releases = await fetchGitHubReleases('CloudburstMC/Nukkit');
+  const release = releases.find((entry) => String(entry.tag_name || '').replace(/^v/i, '') === String(version).replace(/^v/i, ''));
+  if (!release) {
+    throw new Error('Nukkit version not found');
+  }
+  const asset = (release.assets || []).find((item) => /\.jar$/i.test(String(item.name || '')));
+  if (!asset?.browser_download_url) {
+    throw new Error('No downloadable Nukkit jar found for that release');
+  }
+  return {
+    url: asset.browser_download_url,
+    checksum: null,
+    version: String(release.tag_name || version).replace(/^v/i, ''),
+  };
+}
+
+function supportsPluginCrossplay(type) {
+  return ['paper', 'purpur'].includes(String(type || '').toLowerCase());
+}
+
+async function installCrossplayPlugins() {
+  if (!supportsPluginCrossplay(CONFIG.serverType)) {
+    throw new Error('Crossplay install currently requires a Paper or Purpur server');
+  }
+  ensureDir(path.join(CONFIG.serverDir, 'plugins'));
+  const targets = [
+    {
+      name: 'Geyser',
+      url: 'https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot',
+      fileName: 'Geyser-Spigot.jar',
+    },
+    {
+      name: 'Floodgate',
+      url: 'https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot',
+      fileName: 'floodgate-spigot.jar',
+    },
+  ];
+
+  downloadState = { name: 'Crossplay plugins', progress: 0, total: targets.length, done: false, error: null };
+  broadcast({ type: 'download', ...downloadState });
+
+  for (let i = 0; i < targets.length; i += 1) {
+    const target = targets[i];
+    const outPath = path.join(CONFIG.serverDir, 'plugins', target.fileName);
+    addLog(`--- Downloading ${target.name} ---`, 'system');
+    downloadState.name = `${target.name} plugin`;
+    downloadState.progress = i;
+    broadcast({ type: 'download', ...downloadState });
+    await downloadFileWithProgress(target.url, outPath);
+    updateIntegrityRecord(outPath, { source: 'crossplay install', package: target.name.toLowerCase() });
+  }
+
+  downloadState.progress = targets.length;
+  downloadState.done = true;
+  downloadState.name = 'Crossplay plugins ready';
+  broadcast({ type: 'download', ...downloadState });
+  addLog('--- Crossplay plugins installed: Geyser + Floodgate ---', 'system');
+}
+
 async function performServerDownload(type, version) {
   ensureDir(CONFIG.serverDir);
   const outPath = path.join(CONFIG.serverDir, 'server.jar');
@@ -1399,6 +1483,10 @@ async function performServerDownload(type, version) {
 
   if (type === 'paper') {
     const info = await fetchPaperDownload(version);
+    downloadUrl = info.url;
+    expectedChecksum = info.checksum;
+  } else if (type === 'purpur') {
+    const info = await fetchPurpurDownload(version);
     downloadUrl = info.url;
     expectedChecksum = info.checksum;
   } else if (type === 'vanilla') {
@@ -1412,6 +1500,11 @@ async function performServerDownload(type, version) {
     expectedChecksum = details.downloads.server.sha1
       ? { algorithm: 'sha1', value: String(details.downloads.server.sha1).toLowerCase() }
       : null;
+  } else if (type === 'nukkit') {
+    const info = await fetchNukkitDownload(version);
+    downloadUrl = info.url;
+    expectedChecksum = info.checksum;
+    version = info.version;
   } else {
     throw new Error('Unsupported server type');
   }
@@ -1649,7 +1742,7 @@ async function handleServerDownload(type, version) {
     }
   }
 
-  if (type === 'paper' || type === 'vanilla') {
+  if (type === 'paper' || type === 'purpur' || type === 'vanilla' || type === 'nukkit') {
     await performServerDownload(type, version);
     return;
   }
@@ -2159,6 +2252,15 @@ app.get('/api/versions/paper', async (req, res) => {
   }
 });
 
+app.get('/api/versions/purpur', async (req, res) => {
+  try {
+    const data = await httpsGet('https://api.purpurmc.org/v2/purpur');
+    res.json({ versions: [...(data.versions || [])].reverse() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/versions/vanilla', async (req, res) => {
   try {
     const manifest = await httpsGet('https://launchermeta.mojang.com/mc/game/version_manifest_v2.json');
@@ -2169,6 +2271,19 @@ app.get('/api/versions/vanilla', async (req, res) => {
     });
   } catch (error) {
     res.json({ error: error.message });
+  }
+});
+
+app.get('/api/versions/nukkit', async (req, res) => {
+  try {
+    const releases = await fetchGitHubReleases('CloudburstMC/Nukkit');
+    res.json({
+      versions: releases
+        .map((release) => String(release.tag_name || '').replace(/^v/i, ''))
+        .filter(Boolean),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -2250,6 +2365,18 @@ app.post('/api/download', async (req, res) => {
     downloadState.error = error.message;
     addLog(`Download error: ${error.message}`, 'error');
     broadcast({ type: 'download', ...downloadState });
+  }
+});
+
+app.post('/api/crossplay/install', async (req, res) => {
+  try {
+    await installCrossplayPlugins();
+    res.json({ ok: true });
+  } catch (error) {
+    downloadState = downloadState || { name: 'Crossplay install', progress: 0, total: 0, done: false, error: null };
+    downloadState.error = error.message;
+    broadcast({ type: 'download', ...downloadState });
+    res.status(400).json({ error: error.message });
   }
 });
 
