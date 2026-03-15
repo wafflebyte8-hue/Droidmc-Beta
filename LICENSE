@@ -1,32 +1,43 @@
 DROIDMC LICENSE
-Version 1.0, March 14, 2026
+Version 1.1, March 15, 2026
 
 Copyright (c) 2026 loaf, mik. All rights reserved.
 
 1. Grant of Permission
-You are permitted to view, download, clone, and use this software for personal, private, and non-commercial use only.
+   You are permitted to view, download, clone, and use this software for personal, private, and non-commercial use only.
 
 2. Restrictions
-You may not, without prior written permission from the copyright holders:
+   You may not, without prior written permission from the copyright holders:
+
 - publish, distribute, sublicense, or sell this software
 - create or release modified versions of this software
 - publicly fork, mirror, or rehost this software
 - use any part of this software in another public project
 
 3. Prohibited Uses
-You may not use this software, or any modified version of it:
+   You may not use this software, or any modified version of it:
+
 - for malware, spyware, viruses, malicious code, or unauthorized access
 - for illegal activity
 - to harm, disrupt, or exploit other people, devices, or services
 
 4. Permission for Public Releases
-If you want to release a modified version, public fork, or derivative work, you must first obtain written permission from the copyright holders.
+   If you want to release a modified version, public fork, or derivative work, you must first obtain written permission from the copyright holders.
 
 5. Termination
-Any violation of this license immediately terminates your rights under it.
+   Any violation of this license immediately terminates your rights under it.
 
 6. No Warranty
-This software is provided "as is", without warranty of any kind, express or implied, including but not limited to merchantability, fitness for a particular purpose, and noninfringement.
+   This software is provided "as is", without warranty of any kind, express or implied, including but not limited to merchantability, fitness for a particular purpose, and noninfringement.
 
 7. Limitation of Liability
-In no event shall the copyright holders be liable for any claim, damages, or other liability arising from, out of, or in connection with the software or its use.
+   In no event shall the copyright holders be liable for any claim, damages, or other liability arising from, out of, or in connection with the software or its use.
+
+8. Rooted Devices
+   If you run this software on a rooted device, you do so at your own risk. The copyright holders are not responsible for damage, data loss, instability, or other issues resulting from rooted environments or elevated system access.
+
+9. Source Availability
+   You may inspect, study, and privately use this source code for personal, private, educational, and non-commercial purposes. You may also reuse limited parts of the code in private projects only. Public redistribution, public forks, and public derivative works still require prior written permission from the copyright holders.
+
+10. Additional Publishing License
+    If the copyright holders approve your request to publicly publish a fork, modified version, derivative work, or any substantial part of this software, they may grant you a separate written license for that purpose. Any such license remains valid until it is revoked, expires under its own terms, or is terminated due to a violation of its conditions.
