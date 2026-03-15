@@ -909,6 +909,22 @@ function bindEvents() {
     };
     await request(false);
   });
+  $('installCrossplayBtn').addEventListener('click', async () => {
+    const response = await fetch('/api/crossplay/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const data = await response.json();
+    if (response.status === 401) {
+      showLogin(true, 'Authentication required');
+      throw new Error('Authentication required');
+    }
+    if (!response.ok || data.error) {
+      throw new Error(data.error || `Request failed (${response.status})`);
+    }
+    await Promise.all([loadPlugins(), loadFiles()]);
+    toast('Crossplay plugin install started', 'ok');
+  });
   $('reloadModsBtn').addEventListener('click', () => loadMods().catch((error) => toast(error.message, 'err')));
   $('reloadPluginsBtn').addEventListener('click', () => loadPlugins().catch((error) => toast(error.message, 'err')));
   $('refreshPlayersBtn').addEventListener('click', () => api('/api/list', { method: 'POST' }).catch((error) => toast(error.message, 'err')));
