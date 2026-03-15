@@ -1,6 +1,7 @@
 <img src="image.png" alt="DroidMC screenshot" width="500" />
 
-# DroidMC
+# DroidMC beta
+mantained by Wafflebyte8-hue
 
 Minecraft server panel that runs directly on your Android phone through Termux. Control your server from any browser on the same WiFi.
 
