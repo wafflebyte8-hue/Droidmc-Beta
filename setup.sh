@@ -36,6 +36,27 @@ cleanup() {
 }
 trap cleanup EXIT
 
+stop_running_instances() {
+  local stopped=0
+
+  if command -v tmux >/dev/null 2>&1 && tmux has-session -t mc 2>/dev/null; then
+    tmux kill-session -t mc || true
+    stopped=1
+    log "Stopped tmux session 'mc'"
+  fi
+
+  if command -v pkill >/dev/null 2>&1; then
+    if pkill -f "$UI_DIR/server.js" 2>/dev/null; then
+      stopped=1
+      log "Stopped running DroidMC panel"
+    fi
+  fi
+
+  if [ "$stopped" -eq 0 ]; then
+    info "No running DroidMC panel detected"
+  fi
+}
+
 clear
 echo ""
 echo -e "${G}  DroidMC Setup${N}"
@@ -197,16 +218,23 @@ HTTPS_CERT_DIR="$UI_DIR/certs"
 HTTPS_CERT_PATH="$HTTPS_CERT_DIR/cert.pem"
 HTTPS_KEY_PATH="$HTTPS_CERT_DIR/key.pem"
 
-step "HTTPS certificate"
-read -r -p "  Enable HTTPS for the web panel with a self-signed certificate? [Y/n]: " https_ans
-if [[ ! "$https_ans" =~ ^[Nn]$ ]]; then
-  ENABLE_HTTPS=1
-  read -r -p "  HTTPS port [default: 8443]: " https_port_input
-  HTTPS_PORT="${https_port_input:-8443}"
+if [ "$KEEP_CONFIG" -eq 0 ]; then
+  step "HTTPS certificate"
+  read -r -p "  Enable HTTPS for the web panel with a self-signed certificate? [Y/n]: " https_ans
+  if [[ ! "$https_ans" =~ ^[Nn]$ ]]; then
+    ENABLE_HTTPS=1
+    read -r -p "  HTTPS port [default: 8443]: " https_port_input
+    HTTPS_PORT="${https_port_input:-8443}"
+  fi
+else
+  ENABLE_HTTPS="$(node -e "try{const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(j.httpsEnabled?'1':'0')}catch{process.stdout.write('0')}" "$UI_DIR/config.json")"
+  HTTPS_PORT="$(node -e "try{const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(String(j.httpsPort||8443))}catch{process.stdout.write('8443')}" "$UI_DIR/config.json")"
+  info "Keeping existing HTTPS configuration"
 fi
 
 step "Installing files"
 
+stop_running_instances
 mkdir -p "$UI_DIR/public" "$MC_DIR" "$UI_DIR/backups" "$BACKUP_ROOT"
 cp "$TMP_DIR/server.js" "$UI_DIR/server.js"
 cp "$TMP_DIR/package.json" "$UI_DIR/package.json"
@@ -371,14 +399,17 @@ fi
 step "Validation summary"
 
 AUTH_USER="$(node -e "try{const fs=require('fs');const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,'utf8'));process.stdout.write(j.username||'admin')}catch{process.stdout.write('admin')}" "$UI_DIR/auth.json")"
+UI_PORT="$(node -e "try{const fs=require('fs');const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,'utf8'));process.stdout.write(String(j.uiPort||8080))}catch{process.stdout.write('8080')}" "$UI_DIR/config.json")"
+HTTPS_ENABLED_ACTUAL="$(node -e "try{const fs=require('fs');const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,'utf8'));process.stdout.write(j.httpsEnabled?'1':'0')}catch{process.stdout.write('0')}" "$UI_DIR/config.json")"
+HTTPS_PORT_ACTUAL="$(node -e "try{const fs=require('fs');const p=process.argv[1];const j=JSON.parse(fs.readFileSync(p,'utf8'));process.stdout.write(String(j.httpsPort||8443))}catch{process.stdout.write('8443')}" "$UI_DIR/config.json")"
 echo -e "  ${D}Panel path:${N}      $UI_DIR"
 echo -e "  ${D}Server path:${N}     $MC_DIR"
 echo -e "  ${D}Panel login:${N}     $AUTH_USER"
 echo -e "  ${D}Backup folder:${N}   $UI_DIR/backups"
-if [ "$ENABLE_HTTPS" -eq 1 ]; then
-  echo -e "  ${D}Panel URL:${N}       https://localhost:$HTTPS_PORT"
+if [ "$HTTPS_ENABLED_ACTUAL" = "1" ]; then
+  echo -e "  ${D}Panel URL:${N}       https://localhost:$HTTPS_PORT_ACTUAL"
 else
-  echo -e "  ${D}Panel URL:${N}       http://localhost:8080"
+  echo -e "  ${D}Panel URL:${N}       http://localhost:$UI_PORT"
 fi
 echo -e "  ${D}Foreground:${N}      ~/start-mc.sh"
 command -v tmux >/dev/null 2>&1 && echo -e "  ${D}Background:${N}      ~/start-mc-bg.sh"
