@@ -1,6 +1,7 @@
 <img src="image.png" alt="DroidMC screenshot" width="500" />
 
 # DroidMC Beta
+
 Maintained by Wafflebyte8-hue
 
 Experimental development branch of DroidMC for faster updates, new features, and early fixes before they are promoted to stable.
@@ -128,6 +129,7 @@ You will be asked whether to keep or delete world data before anything is remove
 - Purpur install support
 - Bedrock-target Nukkit install support
 - Cross-platform install helper for Geyser + Floodgate
+- Duckdns
 
 ---
 
