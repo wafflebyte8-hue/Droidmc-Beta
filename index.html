@@ -618,13 +618,60 @@
                 <button class="abtn primary" id="saveAuthBtn">Change Credentials</button>
               </div>
             </div>
+
+            <div class="panel">
+              <div class="panel-title">DuckDNS</div>
+              <div class="cfg-grid compact-grid">
+                <div class="cfg-row">
+                  <div class="cfg-lbl">
+                    <div class="cfg-name">Enable DuckDNS</div>
+                    <div class="cfg-desc">Keep a `something.duckdns.org` host pointed at your current public IP</div>
+                  </div>
+                  <input type="checkbox" id="ddnsEnabled" />
+                </div>
+                <div class="cfg-row">
+                  <div class="cfg-lbl">
+                    <div class="cfg-name">DuckDNS Subdomain</div>
+                    <div class="cfg-desc">Enter only the subdomain part, like `myserver`</div>
+                  </div>
+                  <input class="cfg-inp" id="ddnsDomain" placeholder="myserver" autocapitalize="off" autocorrect="off" spellcheck="false" />
+                </div>
+                <div class="cfg-row">
+                  <div class="cfg-lbl">
+                    <div class="cfg-name">DuckDNS Token</div>
+                    <div class="cfg-desc">API token from DuckDNS. Never share it. Leave blank to keep the current token.</div>
+                  </div>
+                  <input class="cfg-inp" id="ddnsToken" type="password" placeholder="Paste DuckDNS token" autocomplete="new-password" />
+                </div>
+                <div class="cfg-row">
+                  <div class="cfg-lbl">
+                    <div class="cfg-name">Token Storage</div>
+                    <div class="cfg-desc">DroidMC never sends the saved token back to the browser.</div>
+                  </div>
+                  <div class="tip-cmd" id="ddnsTokenStatus">No token saved yet</div>
+                </div>
+                <div class="cfg-row">
+                  <div class="cfg-lbl">
+                    <div class="cfg-name">Update Interval</div>
+                    <div class="cfg-desc">Minutes between automatic refreshes, minimum 5</div>
+                  </div>
+                  <input class="cfg-inp" id="ddnsInterval" placeholder="10" />
+                </div>
+              </div>
+              <div class="settings-actions">
+                <button class="abtn ghost" id="updateDuckDnsBtn">Update Now</button>
+              </div>
+            </div>
           </div>
 
           <div class="panel" style="margin-top: 12px">
             <div class="panel-title">Connection Info</div>
             <div class="tips-list">
               <div class="tip-row">Panel: <span class="tip-cmd" id="panelLAN">-</span></div>
+              <div class="tip-row">Public Panel: <span class="tip-cmd" id="panelPublic">Not configured</span></div>
               <div class="tip-row">Minecraft: <span class="tip-cmd" id="aLAN">-</span></div>
+              <div class="tip-row">DuckDNS Host: <span class="tip-cmd" id="duckDnsHost">Not configured</span></div>
+              <div class="tip-row">DuckDNS Status: <span class="tip-cmd" id="duckDnsState">Disabled</span></div>
             </div>
           </div>
         </div>

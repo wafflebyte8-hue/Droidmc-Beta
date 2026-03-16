@@ -53,6 +53,10 @@ const CONFIG_DEFAULTS = {
   scheduleBroadcastMessage: 'Scheduled notice from DroidMC.',
   scheduleRestartTime: '',
   motd: 'A DroidMC Minecraft Server',
+  duckDnsEnabled: false,
+  duckDnsDomain: '',
+  duckDnsToken: '',
+  duckDnsIntervalMinutes: 10,
   lastDownloadedChecksum: '',
   lastDownloadedChecksumType: '',
 };
@@ -134,6 +138,15 @@ let schedulerState = {
   lastBroadcastAt: 0,
   lastRestartSlot: '',
 };
+let duckDnsState = {
+  enabled: false,
+  host: '',
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastResult: 'disabled',
+  lastError: '',
+  nextRunAt: null,
+};
 let server;
 let wss;
 
@@ -206,6 +219,14 @@ function loadConfig() {
 
 function saveConfig() {
   writeJsonFile(CONFIG_FILE, CONFIG);
+}
+
+function getPublicConfig() {
+  const { duckDnsToken, ...rest } = CONFIG;
+  return {
+    ...rest,
+    duckDnsTokenConfigured: !!String(duckDnsToken || '').trim(),
+  };
 }
 
 function loadAuth() {
@@ -623,6 +644,126 @@ function hasHttpsConfig() {
     && fs.existsSync(CONFIG.httpsCertPath));
 }
 
+function normalizeDuckDnsDomain(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '')
+    .replace(/\.duckdns\.org$/, '')
+    .replace(/[^a-z0-9-]/g, '');
+}
+
+function getDuckDnsHost() {
+  const subdomain = normalizeDuckDnsDomain(CONFIG.duckDnsDomain);
+  return subdomain ? `${subdomain}.duckdns.org` : '';
+}
+
+function hasDuckDnsConfig() {
+  return !!(CONFIG.duckDnsEnabled && getDuckDnsHost() && String(CONFIG.duckDnsToken || '').trim());
+}
+
+function getDuckDnsIntervalMs() {
+  const minutes = Math.max(5, Number.parseInt(CONFIG.duckDnsIntervalMinutes, 10) || 10);
+  return minutes * 60 * 1000;
+}
+
+function getPublicPanelUrl() {
+  const host = getDuckDnsHost();
+  if (!host) {
+    return null;
+  }
+  const protocol = hasHttpsConfig() ? 'https' : 'http';
+  const port = protocol === 'https' ? CONFIG.httpsPort : CONFIG.uiPort;
+  return `${protocol}://${host}:${port}`;
+}
+
+async function runDuckDnsUpdate(reason = 'scheduled') {
+  if (!hasDuckDnsConfig()) {
+    duckDnsState = {
+      enabled: false,
+      host: getDuckDnsHost(),
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      lastResult: 'disabled',
+      lastError: '',
+      nextRunAt: null,
+    };
+    return duckDnsState;
+  }
+
+  const subdomain = normalizeDuckDnsDomain(CONFIG.duckDnsDomain);
+  const host = getDuckDnsHost();
+  const attemptedAt = new Date().toISOString();
+  const query = new URLSearchParams({
+    domains: subdomain,
+    token: String(CONFIG.duckDnsToken || '').trim(),
+    ip: '',
+  });
+
+  duckDnsState = {
+    ...duckDnsState,
+    enabled: true,
+    host,
+    lastAttemptAt: attemptedAt,
+    lastError: '',
+    nextRunAt: new Date(Date.now() + getDuckDnsIntervalMs()).toISOString(),
+  };
+
+  try {
+    const result = String(await httpsGetRaw(`https://www.duckdns.org/update?${query.toString()}`)).trim();
+    const ok = /^ok$/i.test(result);
+    duckDnsState = {
+      ...duckDnsState,
+      enabled: true,
+      host,
+      lastResult: result || 'empty',
+      lastError: ok ? '' : `DuckDNS returned ${result || 'empty'}`,
+      lastSuccessAt: ok ? attemptedAt : duckDnsState.lastSuccessAt,
+      nextRunAt: new Date(Date.now() + getDuckDnsIntervalMs()).toISOString(),
+    };
+    addLog(ok
+      ? `DuckDNS updated ${host} (${reason})`
+      : `DuckDNS update failed for ${host}: ${result || 'empty'}`,
+    ok ? 'system' : 'warn');
+  } catch (error) {
+    duckDnsState = {
+      ...duckDnsState,
+      enabled: true,
+      host,
+      lastResult: 'error',
+      lastError: error.message,
+      nextRunAt: new Date(Date.now() + getDuckDnsIntervalMs()).toISOString(),
+    };
+    addLog(`DuckDNS update failed for ${host}: ${error.message}`, 'warn');
+  }
+
+  broadcast({ type: 'status', ...buildStatusPayload() });
+  return duckDnsState;
+}
+
+async function maybeRunDuckDnsUpdate() {
+  if (!hasDuckDnsConfig()) {
+    if (duckDnsState.enabled || duckDnsState.host) {
+      duckDnsState = {
+        enabled: false,
+        host: '',
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        lastResult: 'disabled',
+        lastError: '',
+        nextRunAt: null,
+      };
+      broadcast({ type: 'status', ...buildStatusPayload() });
+    }
+    return;
+  }
+  const lastAttempt = duckDnsState.lastAttemptAt ? Date.parse(duckDnsState.lastAttemptAt) : 0;
+  if (!lastAttempt || (Date.now() - lastAttempt) >= getDuckDnsIntervalMs()) {
+    await runDuckDnsUpdate('scheduled');
+  }
+}
+
 function getNetworkInfo() {
   const interfaces = os.networkInterfaces();
   const addresses = [];
@@ -646,6 +787,12 @@ function getNetworkInfo() {
     panelPort: CONFIG.uiPort,
     panelSecurePort: hasHttpsConfig() ? CONFIG.httpsPort : null,
     panelProtocol: hasHttpsConfig() ? 'https' : 'http',
+    duckDnsEnabled: hasDuckDnsConfig(),
+    duckDnsHost: getDuckDnsHost(),
+    publicPanelUrl: getPublicPanelUrl(),
+    duckDnsStatus: duckDnsState.lastError ? `error: ${duckDnsState.lastError}` : duckDnsState.lastResult,
+    duckDnsLastSuccessAt: duckDnsState.lastSuccessAt,
+    duckDnsNextRunAt: duckDnsState.nextRunAt,
   };
 }
 
@@ -721,7 +868,7 @@ function appendCrashLog(reason, code, signal) {
 function buildStatusPayload() {
   return {
     running: !!mcProcess,
-    config: CONFIG,
+    config: getPublicConfig(),
     uptime: getUptime(),
     players: Object.values(onlinePlayers),
     jarExists: fs.existsSync(path.join(CONFIG.serverDir, CONFIG.serverJar)),
@@ -1083,10 +1230,10 @@ function applyPreset(name) {
   CONFIG.memory = preset.memory;
   saveConfig();
   writeProperties(preset.properties);
-  broadcast({ type: 'config', config: CONFIG });
+  broadcast({ type: 'config', config: getPublicConfig() });
   return {
     preset: name,
-    config: CONFIG,
+    config: getPublicConfig(),
     properties: readProperties(),
   };
 }
@@ -1143,6 +1290,13 @@ function collectValidation() {
       label: 'tmux',
       ok: commandExists('tmux'),
       detail: commandExists('tmux') ? 'Available' : 'Install tmux for background sessions',
+    },
+    {
+      label: 'DuckDNS',
+      ok: !CONFIG.duckDnsEnabled || !!(getDuckDnsHost() && String(CONFIG.duckDnsToken || '').trim()),
+      detail: CONFIG.duckDnsEnabled
+        ? `${getDuckDnsHost() || 'domain missing'} | ${duckDnsState.lastError ? duckDnsState.lastError : duckDnsState.lastResult}`
+        : 'Disabled',
     },
     {
       label: 'Checksums manifest',
@@ -1523,7 +1677,7 @@ async function performServerDownload(type, version) {
   downloadState.done = true;
   downloadState.checksum = integrity.sha256 || null;
   broadcast({ type: 'download', ...downloadState });
-  broadcast({ type: 'config', config: CONFIG });
+  broadcast({ type: 'config', config: getPublicConfig() });
   broadcast({ type: 'jarReady' });
 }
 
@@ -1573,7 +1727,7 @@ async function performInstallerDownload(type, version) {
     downloadState.done = true;
     downloadState.checksum = integrity ? integrity.sha256 : null;
     broadcast({ type: 'download', ...downloadState });
-    broadcast({ type: 'config', config: CONFIG });
+    broadcast({ type: 'config', config: getPublicConfig() });
     broadcast({ type: 'jarReady' });
     return;
   }
@@ -1620,7 +1774,7 @@ async function performInstallerDownload(type, version) {
     downloadState.done = true;
     downloadState.checksum = integrity ? integrity.sha256 : null;
     broadcast({ type: 'download', ...downloadState });
-    broadcast({ type: 'config', config: CONFIG });
+    broadcast({ type: 'config', config: getPublicConfig() });
     broadcast({ type: 'jarReady' });
     return;
   }
@@ -1675,7 +1829,7 @@ async function performInstallerDownload(type, version) {
     downloadState.done = true;
     downloadState.checksum = integrity ? integrity.sha256 : null;
     broadcast({ type: 'download', ...downloadState });
-    broadcast({ type: 'config', config: CONFIG });
+    broadcast({ type: 'config', config: getPublicConfig() });
     broadcast({ type: 'jarReady' });
     return;
   }
@@ -1720,7 +1874,7 @@ async function performInstallerDownload(type, version) {
     downloadState.done = true;
     downloadState.checksum = integrity ? integrity.sha256 : null;
     broadcast({ type: 'download', ...downloadState });
-    broadcast({ type: 'config', config: CONFIG });
+    broadcast({ type: 'config', config: getPublicConfig() });
     broadcast({ type: 'jarReady' });
     return;
   }
@@ -1984,10 +2138,10 @@ app.post('/api/list', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  res.json(CONFIG);
+  res.json(getPublicConfig());
 });
 
-app.post('/api/config', (req, res) => {
+app.post('/api/config', async (req, res) => {
   const nextConfig = { ...CONFIG };
   if (req.body?.memory) {
     nextConfig.memory = String(req.body.memory).trim().toUpperCase();
@@ -2045,11 +2199,41 @@ app.post('/api/config', (req, res) => {
   if (Object.prototype.hasOwnProperty.call(req.body || {}, 'motd')) {
     nextConfig.motd = String(req.body.motd || '');
   }
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'duckDnsEnabled')) {
+    nextConfig.duckDnsEnabled = !!req.body.duckDnsEnabled;
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'duckDnsDomain')) {
+    nextConfig.duckDnsDomain = normalizeDuckDnsDomain(req.body.duckDnsDomain);
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'duckDnsToken')) {
+    const nextToken = String(req.body.duckDnsToken || '').trim();
+    if (nextToken) {
+      nextConfig.duckDnsToken = nextToken;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'duckDnsIntervalMinutes')) {
+    nextConfig.duckDnsIntervalMinutes = Math.max(5, Number.parseInt(req.body.duckDnsIntervalMinutes, 10) || 10);
+  }
   CONFIG = nextConfig;
   saveConfig();
+  if (hasDuckDnsConfig()) {
+    await runDuckDnsUpdate('config save');
+  } else {
+    await maybeRunDuckDnsUpdate();
+  }
   updateSystemStats();
-  broadcast({ type: 'config', config: CONFIG });
-  res.json({ ok: true, config: CONFIG });
+  broadcast({ type: 'config', config: getPublicConfig() });
+  broadcast({ type: 'status', ...buildStatusPayload() });
+  res.json({ ok: true, config: getPublicConfig() });
+});
+
+app.post('/api/duckdns/update', async (req, res) => {
+  if (!hasDuckDnsConfig()) {
+    res.status(400).json({ error: 'DuckDNS is not configured yet' });
+    return;
+  }
+  const state = await runDuckDnsUpdate('manual');
+  res.json({ ok: !state.lastError, state });
 });
 
 app.get('/api/presets', (req, res) => {
@@ -2401,6 +2585,11 @@ app.get('/', (req, res) => {
 updateSystemStats();
 setInterval(updateSystemStats, 1000);
 setInterval(maybeRunScheduledTasks, 30 * 1000);
+setInterval(() => {
+  maybeRunDuckDnsUpdate().catch((error) => {
+    addLog(`DuckDNS scheduler error: ${error.message}`, 'warn');
+  });
+}, 60 * 1000);
 
 function createPanelServer() {
   if (hasHttpsConfig()) {
@@ -2425,7 +2614,7 @@ wss.on('connection', (socket, req) => {
 
   socket.send(JSON.stringify({ type: 'history', logs: logHistory }));
   socket.send(JSON.stringify({ type: 'status', ...buildStatusPayload() }));
-  socket.send(JSON.stringify({ type: 'config', config: CONFIG }));
+  socket.send(JSON.stringify({ type: 'config', config: getPublicConfig() }));
   socket.send(JSON.stringify({ type: 'stats', ...systemStats }));
   if (downloadState) {
     socket.send(JSON.stringify({ type: 'download', ...downloadState }));
@@ -2446,4 +2635,7 @@ server.listen(panelServer.port, '0.0.0.0', () => {
   const network = getNetworkInfo();
   console.log(`\n  DroidMC panel: ${panelServer.protocol}://localhost:${panelServer.port}`);
   console.log(`  LAN address:   ${panelServer.protocol}://${network.lanIp}:${panelServer.port}\n`);
+  maybeRunDuckDnsUpdate().catch((error) => {
+    addLog(`DuckDNS startup error: ${error.message}`, 'warn');
+  });
 });
